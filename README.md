@@ -44,19 +44,19 @@ nc -u 192.168.0.201 4210
 ## Pictures
 <p align="center">
     <br>
-    <img src="img/inside.jpg" width=750 alt="Inside" class="image mod-full-width">
+    <img src="img/inside.jpg" width=650 alt="Inside" class="image mod-full-width">
     <br>
-    <img src="img/back.jpg" width=750 alt="Back" class="image mod-full-width">
+    <img src="img/back.jpg" width=650 alt="Back" class="image mod-full-width">
     <br>
-    <img src="img/mounted.jpg" width=750 alt="Mounted" class="image mod-full-width">
+    <img src="img/mounted.jpg" width=650 alt="Mounted" class="image mod-full-width">
     <br>
-    <img src="img/socket.jpg" width=750 alt="Socket" class="image mod-full-width">
+    <img src="img/socket.jpg" width=650 alt="Socket" class="image mod-full-width">
     <br>
-    <img src="img/parts.png" width=750 alt="Rendered Parts" class="image mod-full-width">
+    <img src="img/parts.png" width=650 alt="Rendered Parts" class="image mod-full-width">
     <br>
     <img src="img/homeassistant.png" width=550 alt="Homeassistant" class="image mod-full-width">
     <br>
-    <img src="img/serial.png" width=750 alt="Serial Monitor" class="image mod-full-width">
+    <img src="img/serial.png" width=650 alt="Serial Monitor" class="image mod-full-width">
 </p>
 
 
