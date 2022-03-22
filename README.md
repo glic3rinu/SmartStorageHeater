@@ -35,10 +35,11 @@ Such a system has a couple of disadvantages mitigated by this project:
 
 ## Usage
 
-- UDP
 ```bash
 nc -u 192.168.0.201 4210
 
+mosquitto_sub -h 192.168.0.10 -p 1883 -t "homeassistant/#" -u $MQTT_USER -P $MQTT_PWD
+mosquitto_sub -h 192.168.0.10 -p 1883 -t "home/#" -u $MQTT_USER -P $MQTT_PWD
 ```
 
 ## Pictures

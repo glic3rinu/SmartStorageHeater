@@ -24,7 +24,7 @@ const char* ssid = WIFI_SSID;
 const char* password = WIFI_PASSWORD;
 const char* device_name = "MainHeater";
 
-short eeprom_magic_number = 21637;
+short eeprom_magic_number = 20437;
 
 
 // curl 'http://api.openweathermap.org/data/2.5/forecast?lat=OPENWEATHERMAP_LAT&lon=OPENWEATHERMAP_LON&units=metric&appid=$OPENWEATHERMAP_TOKEN' | python -m json.tool
@@ -40,6 +40,7 @@ const char* mqtt_password = MQTT_PASSWORD;
 const char* state_topic = "home/heaters/main/state";
 const char* set_override_topic = "home/heaters/main/set_override";
 const char* set_override_cycles_topic = "home/heaters/main/set_override_cycles";
+const char* set_led_topic = "home/heaters/main/set_led";
 
 const char* mqtt_name = "Main Heater";
 
@@ -83,6 +84,7 @@ const float sun_temp_coeficient = 2;  // temp increase coeficient for every 4 ho
 short heater_state = -1;  // -1: undefined, 0: off, 1: on
 short override = -1;  // 1-: disabled, 0: heater off, else: number of target hours
 long long override_end = 0; // 0: never stops, else: unix timestamp of last stop cycle
+short led = 1;  // led light on/off
 
 // ULN2003 Motor Driver Pins
 #define IN1 5
@@ -274,7 +276,7 @@ int get_override_cycles() {
 
 void get_state(char *state, Forecast forecast) {
   int target_hours = get_target_hours(forecast);
-  sprintf(state, "forecast.temp=%.2f forecast.sun=%.2f, perceived_temp=%d, heater_state=%d, target_hours=%d, cached_forecast_hour=%d, override=%d, override_cycles=%d, override_end=%d\r\n",
+  sprintf(state, "forecast.temp=%.2f forecast.sun=%.2f, perceived_temp=%d, heater_state=%d, target_hours=%d, cached_forecast_hour=%d, override=%d, override_cycles=%d, override_end=%d, led=%d\r\n",
           forecast.temp,
           forecast.sun,
           get_perceived_temp(forecast),
@@ -283,7 +285,8 @@ void get_state(char *state, Forecast forecast) {
           cached_forecast_hour,
           override,
           get_override_cycles(),
-          override_end
+          override_end,
+          led
          );
 }
 
@@ -329,7 +332,7 @@ void read_udp_cmd() {
       get_state(state, cached_forecast);
       Udp.write(state);
     } else if ( strcmp(cmd, "set_override") == 0) {
-      int override_value = atoi(strsep(&buffer, ":"));
+      short override_value = atoi(strsep(&buffer, ":"));
       if (override_value == NULL) {
         Udp.write("set_override has invalid override value");
       } else {
@@ -343,6 +346,14 @@ void read_udp_cmd() {
       } else {
         set_override_cycles(override_cycles);
         Udp.write("set_override_cycles ACK\r\n");
+      }
+    } else if ( strcmp(cmd, "set_led") == 0) {
+      short led_value = atoi(strsep(&buffer, ":"));
+      if (led_value != 1 && led_value != 0) {
+        Udp.write("set_led has invalid override value");
+      } else {
+        set_led(led_value);
+        Udp.write("set_led ACK\r\n");
       }
     } else {
       Udp.write("Unkown command\r\n");
@@ -393,10 +404,14 @@ void set_override_cycles(int value) {
   publish_mqtt_state(cached_forecast);
 }
 
-void set_override(int value) {
+void set_override(short value) {
   Serial.printf("set_override(%d): ", value);
+  if (value > 24 || value < 0) {
+    Serial.println("ERROR: Invalid ser_override value");
+    return;
+  }
   override = value;
-  // arduino 2 byte ints
+  // ESP 2 byte shorts
   int addr = 2;
   EEPROM.write(addr, override >> 8);
   EEPROM.write(addr + 1, override & 0xFF);
@@ -409,19 +424,39 @@ void set_override(int value) {
 }
 
 
-void mqtt_callback(char* topic, byte * payload, unsigned int length) {
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)payload[i]);
+void set_led(short value) {
+  Serial.printf("set_led(%d): ", value);
+  if (value != 0 && value != 1) {
+    Serial.println("ERROR: Invalid set_led value");
+    return;
   }
-  Serial.println();
+  led = value;
+  // ESP 2 byte shorts
+  int addr = 12;
+  EEPROM.write(addr, led >> 8);
+  EEPROM.write(addr + 1, led & 0xFF);
+  if (EEPROM.commit()) {
+    Serial.println("EEPROM set_led successfully committed");
+  } else {
+    Serial.println("ERROR! set_led EEPROM commit failed");
+  }
+  publish_mqtt_state(cached_forecast);
+}
+
+void mqtt_callback(char* topic, byte * payload, unsigned int length) {
+  payload[length] = NULL;
+  Serial.printf("Message arrived [%s] '%s'\n", topic, (char*)payload);
 
   if (strcmp(topic, set_override_topic) == 0) {
     set_override(atoi((char*)payload));
   } else if (strcmp(topic, set_override_cycles_topic) == 0) {
     set_override_cycles(atoi((char*)payload));
+  } else if (strcmp(topic, set_led_topic) == 0) {
+    if (strcmp((char*)payload, "ON") == 0) {
+      set_led(1);
+    } else {
+      set_led(0);
+    }
   } else {
     Serial.println("Unknown topic");
   }
@@ -492,6 +527,15 @@ void send_mqtt_discovery_messages() {
 
   doc.remove("dev_cla");
   doc.remove("frc_upd");
+
+  doc["name"] = "LED";
+  doc["val_tpl"] = "{{ value_json.led|default(0) }}";
+  doc["uniq_id"] = "main_heater-led";
+  doc["cmd_t"] = set_led_topic;
+  n = serializeJson(doc, buffer);
+  published = mqtt.publish("homeassistant/switch/main_heater/led/config", buffer, n);
+  Serial.printf(" . led discovery published (%d): %d\r\n", n, published);
+
   doc["name"] = "Override Target Hours";
   doc["val_tpl"] = "{{ value_json.override|default(0) }}";
   doc["uniq_id"] = "main_heater-override";
@@ -543,6 +587,7 @@ int reconnect_mqtt() {
     send_mqtt_discovery_messages();
     mqtt.subscribe(set_override_topic);
     mqtt.subscribe(set_override_cycles_topic);
+    mqtt.subscribe(set_led_topic);
     return 0;
   } else {
     Serial.printf("MQTT ERROR connecting to broker, failed with state %d\r\n", mqtt.state());
@@ -592,10 +637,15 @@ int publish_mqtt_state(Forecast forecast) {
   doc["cached_forecast_hour"] = cached_forecast_hour;
   doc["override"] = override;
   doc["override_cycles"] = get_override_cycles();
+  if (led == 1)
+    doc["led"] = "ON";
+  else
+    doc["led"] = "OFF";
+
   size_t n = serializeJson(doc, buffer);
 
   bool published = mqtt.publish(state_topic, buffer, n);
-  Serial.printf(" . State published: %d\r\n", published);
+  Serial.printf(" . State published (%d): %d\r\n", n, published);
   return published;
 }
 
@@ -642,13 +692,14 @@ void setup() {
   reconnect_mqtt();
 
   Serial.print("Reading stored override from EEPROM: ");
-  EEPROM.begin(2 + 2 + 8); // magic number, override, override_end
+  EEPROM.begin(2 + 2 + 8 + 2); // magic number, override, override_end
   int addr = 0;
   short actual_magic_number = (EEPROM.read(addr) << 8) + EEPROM.read(addr + 1);
   if (eeprom_magic_number !=  actual_magic_number) {
-    Serial.printf("Store is empty %d != %d, setting default values...", actual_magic_number, eeprom_magic_number);
+    Serial.printf("Store is empty %d != %d, setting default values...\n", actual_magic_number, eeprom_magic_number);
     set_override(override);
     set_override_cycles(override_end);
+    set_led(led);
     EEPROM.write(addr, eeprom_magic_number >> 8);
     EEPROM.write(addr + 1, eeprom_magic_number & 0xFF);
     EEPROM.commit();
@@ -666,7 +717,9 @@ void setup() {
                    ((long long)EEPROM.read(addr + 5) << 16) +
                    ((long long)EEPROM.read(addr + 6) << 8) +
                    (long long)EEPROM.read(addr + 7);
-    Serial.printf("Read override=%d, override_cycles=%d, override_end=", override, get_override_cycles());
+    addr = 12;
+    led = (EEPROM.read(addr) << 8) + EEPROM.read(addr + 1);
+    Serial.printf("Read override=%d, override_cycles=%d, led=%d, override_end=", override, get_override_cycles(), led);
     Serial.print(override_end);
     Serial.println("");
   }
@@ -706,29 +759,35 @@ void loop() {
   Serial.print(state);
   // sleep for 1 minute but maybe blink LED
   for (int i = 0; i < 2 * 60; ++i) {
-    if (override != -1) {
-      digitalWrite(RED, HIGH);
-      digitalWrite(GREEN, HIGH);
-      digitalWrite(BLUE, HIGH);
-    } else if (forecast.temp == -1 || heater_state == -1) {
-      digitalWrite(RED, HIGH);
-      digitalWrite(GREEN, LOW);
-      digitalWrite(BLUE, LOW);
-    } else if (target_hours > moderate_hours) {
-      digitalWrite(RED, HIGH);
-      digitalWrite(GREEN, LOW);
-      digitalWrite(BLUE, HIGH);
-    } else if (target_hours > 0) {
-      digitalWrite(RED, LOW);
-      digitalWrite(GREEN, LOW);
-      digitalWrite(BLUE, HIGH);
+    if (led == 1) {
+      if (override != -1) {
+        digitalWrite(RED, HIGH);
+        digitalWrite(GREEN, HIGH);
+        digitalWrite(BLUE, HIGH);
+      } else if (forecast.temp == -1 || heater_state == -1) {
+        digitalWrite(RED, HIGH);
+        digitalWrite(GREEN, LOW);
+        digitalWrite(BLUE, LOW);
+      } else if (target_hours > moderate_hours) {
+        digitalWrite(RED, HIGH);
+        digitalWrite(GREEN, LOW);
+        digitalWrite(BLUE, HIGH);
+      } else if (target_hours > 0) {
+        digitalWrite(RED, LOW);
+        digitalWrite(GREEN, LOW);
+        digitalWrite(BLUE, HIGH);
+      } else {
+        digitalWrite(RED, LOW);
+        digitalWrite(GREEN, HIGH);
+        digitalWrite(BLUE, LOW);
+      }
+      if (heater_state == 1 && i % 2) {
+        //blink
+        digitalWrite(RED, LOW);
+        digitalWrite(GREEN, LOW);
+        digitalWrite(BLUE, LOW);
+      }
     } else {
-      digitalWrite(RED, LOW);
-      digitalWrite(GREEN, HIGH);
-      digitalWrite(BLUE, LOW);
-    }
-    if (heater_state == 1 && i % 2) {
-      //blink
       digitalWrite(RED, LOW);
       digitalWrite(GREEN, LOW);
       digitalWrite(BLUE, LOW);
@@ -736,8 +795,10 @@ void loop() {
     do_concurrent_tasks();
     delay(500);
   }
-  // looping colors
-  digitalWrite(RED, HIGH);
-  digitalWrite(GREEN, HIGH);
-  digitalWrite(BLUE, LOW);
+  if (led == 1) {
+    // looping colors
+    digitalWrite(RED, HIGH);
+    digitalWrite(GREEN, HIGH);
+    digitalWrite(BLUE, LOW);
+  }
 }
