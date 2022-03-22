@@ -68,16 +68,16 @@ unsigned int localUdpPort = 4210;  // local port to listen on
 // https://www.ntppool.org/zone/europe
 NTPClient ntp(ntpUdp, "ie.pool.ntp.org");
 
-const int stop_hour = 8; //8; // 24h hour when heater should be turned off
+const int stop_hour = 8; // 24h hour when heater should be turned off
 const int rows = 3;
 const int columns = 2;
 int temp_hours[ rows ][ columns ] = {
   // { temp, hours }
-  { 15, 2 },
-  { 10, 3 },
-  { 5, 4 },
+  { 15, 3 },
+  { 10, 4 },
+  { 5, 6 },
 };
-const int moderate_hours = 2;  // how many hours is considered a moderate use (>moderate: PURPLE else BLUE)
+const int moderate_hours = 4;  // how many hours is considered a moderate use (>moderate: PURPLE else BLUE)
 const float sun_temp_coeficient = 2;  // temp increase coeficient for every 4 hours of sun (adjust effective temperature based on heat from sun)
 
 short heater_state = -1;  // -1: undefined, 0: off, 1: on
@@ -683,11 +683,13 @@ void loop() {
   get_next_stop_time(now, &stop_time);
 
   // apply override
-  if ((override_end == 0) || (now < override_end)) {
-    effective_target_hours = override;
-  } else if (override_end > 0 && now > override_end) {
-    set_override(-1);
-    set_override_cycles(0);
+  if (override != -1) {
+    if ((override_end == 0) || (now < override_end)) {
+      effective_target_hours = override;
+    } else if (override_end > 0 && now > override_end) {
+      set_override(-1);
+      set_override_cycles(0);
+    }
   }
 
   // set heater state
