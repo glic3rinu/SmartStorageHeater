@@ -41,6 +41,7 @@ const char* state_topic = "home/heaters/main/state";
 const char* set_override_topic = "home/heaters/main/set_override";
 const char* set_override_cycles_topic = "home/heaters/main/set_override_cycles";
 const char* set_led_topic = "home/heaters/main/set_led";
+const char* availability_topic = "home/heaters/main/availability";
 
 const char* mqtt_name = "Main Heater";
 
@@ -373,6 +374,7 @@ void do_concurrent_tasks() {
   yield();
 }
 
+
 void set_override_cycles(int value) {
   Serial.printf("set_override_cycles(%d): ", value);
   if (value > 0) {
@@ -404,9 +406,10 @@ void set_override_cycles(int value) {
   publish_mqtt_state(cached_forecast);
 }
 
+
 void set_override(short value) {
   Serial.printf("set_override(%d): ", value);
-  if (value > 24 || value < 0) {
+  if (value > 24 || value < -1) {
     Serial.println("ERROR: Invalid ser_override value");
     return;
   }
@@ -472,7 +475,10 @@ void send_mqtt_discovery_messages() {
 
   doc["stat_t"] = state_topic;
   doc["frc_upd"] = true;
-  //doc["unit_of_meas"] = "";
+  doc["avty_t"] = availability_topic;
+
+  JsonObject dev  = doc.createNestedObject("dev");
+  dev["name"] = "Main Heater"; 
 
   doc["name"] = "Target Hours";
   doc["val_tpl"] = "{{ value_json.target_hours|default(0) }}";
@@ -582,8 +588,9 @@ int reconnect_mqtt() {
     }
   }
   Serial.printf("MQTT connection status: %d\n", mqtt.state());
-  if (mqtt.connect(mqtt_name, mqtt_user, mqtt_password)) {
+  if (mqtt.connect(mqtt_name, mqtt_user, mqtt_password, availability_topic, 1, true, "offline")) {
     Serial.println("MQTT is now connected");
+    mqtt.publish(availability_topic, "online", true);
     send_mqtt_discovery_messages();
     mqtt.subscribe(set_override_topic);
     mqtt.subscribe(set_override_cycles_topic);
@@ -648,6 +655,7 @@ int publish_mqtt_state(Forecast forecast) {
   Serial.printf(" . State published (%d): %d\r\n", n, published);
   return published;
 }
+
 
 void setup() {
   pinMode(HOMING_PIN, INPUT_PULLUP);
