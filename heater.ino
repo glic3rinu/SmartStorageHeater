@@ -80,7 +80,7 @@ int temp_hours[ rows ][ columns ] = {
   { 5, 6 },
 };
 const int moderate_hours = 4;  // how many hours is considered a moderate use (>moderate: PURPLE else BLUE)
-const float sun_temp_coeficient = 2;  // temp increase coeficient for every 4 hours of sun (adjust effective temperature based on heat from sun)
+const float sun_temp_coeficient = 0.8;  // temp increase coeficient for every full hour of sun (adjust effective temperature based on heat from sun)
 
 short heater_state = -1;  // -1: undefined, 0: off, 1: on
 short override = -1;  // 1-: disabled, 0: heater off, else: number of target hours
@@ -178,9 +178,10 @@ Forecast get_forecast(DateTime now) {
 
 
 Forecast fetch_forecast(DateTime now) {
-  float temp_min = -1;
+  float temp_avg = -1;
   float sun = -1;
   int sunset = 0;
+  int count = 0;
 
   if (WiFi.status() != WL_CONNECTED) {
     if (reconnect_wifi() == -1) {
@@ -229,25 +230,33 @@ Forecast fetch_forecast(DateTime now) {
             temp = (float)(item["main"]["temp"]);
             dt = (long long)(item["dt"]);
             if (start_time <= dt && stop_time >= dt) {
+              ++count;
               clouds = (int)item["clouds"]["all"];
               Serial.println((const char*)item["dt_txt"]);
               Serial.printf("  dt = %d\r\n", dt);
               Serial.printf("  temp = %.2f°C\r\n", temp);
-              if (temp_min == -1)
-                temp_min = temp;
+              if (temp_avg == -1)
+                temp_avg = temp;
               else
-                temp_min = min(temp_min, temp);
+                temp_avg += temp;
               if (sunset > dt) {
                 Serial.printf("  clouds = %d\r\n", clouds);
-                if (clouds < 10)
-                  sun += 1.0;
+                if (clouds < 2)
+                  sun += 3.0;
+                else if (clouds < 10)
+                  sun += 2.0;
                 else if (clouds < 20)
-                  sun += 0.5;
+                  sun += 1.5;
+                else if (clouds < 30)
+                  sun += 1.0;
               }
             }
           }
         }
-        Serial.printf("Forecasted min temperature = %.2f°C\r\n", temp_min);
+        if (count) {
+          temp_avg = temp_avg / count;
+        }
+        Serial.printf("Forecasted avg temperature = %.2f°C\r\n", temp_avg);
         Serial.printf("Forecasted sun = %.2f\r\n", sun);
       }
     } else {
@@ -257,7 +266,7 @@ Forecast fetch_forecast(DateTime now) {
   } else {
     Serial.printf("[HTTP} Unable to connect\n");
   }
-  return {temp_min, sun};
+  return {temp_avg, sun};
 }
 
 
@@ -479,6 +488,8 @@ void send_mqtt_discovery_messages() {
 
   JsonObject dev  = doc.createNestedObject("dev");
   dev["name"] = "Main Heater"; 
+  JsonArray dev_identifiers = dev.createNestedArray("identifiers");
+  dev_identifiers.add("main_heater");
 
   doc["name"] = "Target Hours";
   doc["val_tpl"] = "{{ value_json.target_hours|default(0) }}";
